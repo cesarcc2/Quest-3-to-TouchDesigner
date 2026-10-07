@@ -89,7 +89,7 @@ public sealed partial class NdiSender : MonoBehaviour
                 var (w, h) = (sourceTexture.width, sourceTexture.height);
 
                 // Pixel format conversion
-                var buffer = _converter.Encode(sourceTexture, keepAlpha, true);
+                var buffer = _converter.Encode(sourceTexture, keepAlpha, true, rawValues); // [Quest3Bridge patch]
 
                 // Readback entry allocation and request
                 _pool.NewEntry(w, h, keepAlpha, metadata)

@@ -9,7 +9,7 @@ using UnityEngine;
 // Minimal OSC-over-UDP control (no dependencies). Listens on _listenPort and replies
 // the full settings as /quest/* messages to the last sender's IP on _replyPort.
 // Addresses: /fps f  /res i  /eye i  /mirror i  /invert i  /min f  /max f  /near i
-//            /tooclose f  /toofar f  /unknown f  /encoding i  /lowpower i  /kinectscale i  /color i  /colorfps i  /status
+//            /tooclose f  /toofar f  /unknown f  /encoding i  /lowpower i  /replyport i  /kinectscale i  /color i  /colorfps i  /status
 public sealed class OscControl : MonoBehaviour
 {
     [SerializeField] DepthToNdiBridge _bridge;
@@ -57,12 +57,22 @@ public sealed class OscControl : MonoBehaviour
         while (_queue.TryDequeue(out var msg))
         {
             _lastSender = msg.from;
-            if (msg.address == "/status") statusRequested = true;
+            if (msg.address == "/replyport") _replyPort = Mathf.Clamp(Mathf.RoundToInt(msg.value), 1, 65535); // e.g. tools while TD owns 9001
+            else if (msg.address == "/status") statusRequested = true;
             else changed |= Handle(msg.address, msg.value);
         }
         if (changed) _bridge.ApplySettings(); // triggers SendStatus via SettingsApplied
         else if (statusRequested) SendStatus();
+
+        // The lens is only known once the color camera runs: report it as soon as it appears
+        if (_bridge.LensValid && !_lensSent && _lastSender != null)
+        {
+            _lensSent = true;
+            SendStatus();
+        }
     }
+
+    bool _lensSent;
 
     void Start() => _bridge.SettingsApplied += SendStatus;
 
@@ -119,6 +129,12 @@ public sealed class OscControl : MonoBehaviour
             Send("/quest/colorfps", s.colorFps);
             Send("/quest/colorflip", s.colorFlip ? 1 : 0);
             Send("/quest/align", s.alignToColor ? 1 : 0);
+            if (_bridge.LensValid)
+            {
+                var lens = _bridge.Lens; // color camera edge tangents for point clouds
+                Send("/quest/lensx0", lens.x); Send("/quest/lensy0", lens.y);
+                Send("/quest/lensx1", lens.z); Send("/quest/lensy1", lens.w);
+            }
         }
         catch (SocketException e) { Debug.LogWarning($"DepthToNdi: OSC reply failed: {e.Message}"); }
     }

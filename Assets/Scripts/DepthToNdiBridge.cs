@@ -57,6 +57,7 @@ public sealed class DepthToNdiBridge : MonoBehaviour
         _material = new Material(_blitShader);
         _ndiSender.captureMethod = CaptureMethod.Texture;
         _ndiSender.keepAlpha = false;
+        _ndiSender.rawValues = true; // depth is data: no Linear->sRGB gamma (it bent distances)
         _ndiSender.enabled = false;
         _settings.Load();
 
@@ -173,12 +174,23 @@ public sealed class DepthToNdiBridge : MonoBehaviour
         var pose = _colorCamera.GetCameraPose();
         var forward = pose.rotation * Vector3.forward;
         _material.SetVector(AlignOriginID, pose.position);
+        var inverse = Quaternion.Inverse(pose.rotation);
         for (var i = 0; i < 4; i++)
         {
             var dir = _colorCamera.ViewportPointToRay(Corners[i], pose).direction;
             _material.SetVector(AlignCornerIDs[i], dir / Vector3.Dot(dir, forward));
+            var local = inverse * dir;                  // camera space: x right, y up, z forward
+            if (i == 0) { _lens.x = local.x / local.z; _lens.y = local.y / local.z; }
+            if (i == 3) { _lens.z = local.x / local.z; _lens.w = local.y / local.z; }
         }
+        LensValid = true;
     }
+
+    // Color camera lens as tangents at the image edges: (x left, y bottom, x right, y top).
+    // A pixel at viewport (u, v) with forward depth z is at (lerp(x0, x1, u) * z, lerp(y0, y1, v) * z, z).
+    Vector4 _lens;
+    public Vector4 Lens => _lens;
+    public bool LensValid { get; private set; }
 
     void LogDiagnostics()
     {

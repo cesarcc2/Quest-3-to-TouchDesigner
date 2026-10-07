@@ -83,6 +83,13 @@ Detail mode won't match the Kinect's facial detail. The Quest sensor is 320×320
 
 To check calibration, hold your hand 1 m from the headset. The pixel value should be about 0.122. If it's clearly off, set the NDI In TOP's *Input Color Space* inside `quest3` to match.
 
+## Point cloud (Kinect "Color Point Cloud")
+On the `quest3` panel's **Kinect** page, set **Image ▸ Color Point Cloud**. The output becomes a 32-bit float image whose **R, G, B are the X, Y, Z of each pixel in meters**, relative to the color camera (x right, y up, z forward), like the Kinect TOP.
+- **Unknown Point Value:** pixels without depth get (0, 0, 100) or (−inf, −inf, −inf), as on the Kinect TOP.
+- **Color camera:** it turns on by itself. The Quest reports its exact lens geometry (`/quest/lensx0 …`), and depth is aligned to it.
+- **Depth source:** works with **Detail** (measured, blockier) and **AI Detail** (smooth and detailed, estimated).
+- **Use it like the Kinect tutorials:** feed the output into a **TOP to CHOP**, or use it directly as **instancing** in a **Geometry COMP** (Instance page: Translate X/Y/Z = r/g/b). Color the points with the `ndiin_color` image inside `quest3`.
+
 ## AI Detail (color camera + AI depth)
 **Depth Scale ▸ AI Detail** on the `quest3` panel gives much finer depth, with faces showing eyes, nose and lips. It works like this:
 1. The Quest streams its color camera as `Quest3_Color` (1280×960, 30 fps). It also resamples its real depth to the color camera's viewpoint (`/align 1`), so both images line up pixel for pixel.

@@ -45,8 +45,9 @@ def send(name):
         osc('/encoding', 2 if mode in ('detail', 'ai') else 0)
         osc('/kinectscale', 1 if mode == 'kinect' else 0)
         osc('/invert', 1)
-        osc('/color', 1 if ai else 0)    # color camera only when needed (battery)
-        osc('/align', 1 if ai else 0)    # depth resampled to the color camera's view
+        cam = ai or p.Image.eval() == 'pointcloud'   # point clouds need the color camera's lens + alignment
+        osc('/color', 1 if cam else 0)   # color camera only when needed (battery)
+        osc('/align', 1 if cam else 0)   # depth resampled to the color camera's view
 
 def sync_all():
     for n in ('Depthscale', 'Camerares', 'Mirrorimage', 'Tooclosevalue', 'Toofarvalue',
@@ -76,6 +77,10 @@ def onValueChange(par, prev):
         p.Maxdepth = hi
     elif par.name in ('Active', 'Questip'):
         if p.Active.eval(): sync_all()
+    elif par.name == 'Image':
+        if p.Active.eval():
+            send('Depthscale')           # turns the color camera + alignment on/off
+            osc('/status', 0)            # ask for the lens values
     elif p.Active.eval():
         send(par.name)
         if par.name == 'Depthscale' and par.eval() == 'ai':
@@ -333,11 +338,38 @@ def _cook(scriptOp):
                   np.where(res <= -1.0, 2.0 + res, p.Unknownvalue.eval())).astype(np.float32)  # uncalibrated preview
             w = int(p.Camerares.eval()); h = w * 3 // 4                      # camera's 4:3 aspect
             out = W._resize(out, h, w)
-            scriptOp.copyNumpyArray(np.dstack([out, out, out, np.ones_like(out)]))
+            if p.Image.eval() == 'pointcloud':                                 # alpha = valid point
+                alpha = (W._resize((res > 0).astype(np.float32), h, w) > 0.5).astype(np.float32)
+            else:
+                alpha = np.ones_like(out)
+            scriptOp.copyNumpyArray(np.dstack([out, out, out, alpha]))
     if S['shown'] != S['status']:
         S['shown'] = S['status']
         p.Aistatus = S['status']
     return
+'''
+
+PC_GLSL = r'''
+// Kinect-style point cloud: RGB = XYZ in meters relative to the color camera (x right, y up, z forward).
+// Input = the panel's depth image (Kinect units or Min..Max stretched), alpha = valid.
+uniform vec4 uLens;   // color camera edge tangents: x left, y bottom, x right, y top
+uniform vec4 uConv;   // x: 1 = stretched (Min..Max), y: min m, z: max m, w: mirror
+uniform vec4 uUnk;    // x: 1 = (-inf,-inf,-inf), 0 = (0,0,100)
+out vec4 fragColor;
+void main() {
+    vec4 c = texture(sTD2DInputs[0], vUV.st);
+    float z = uConv.x > 0.5 ? uConv.y + c.r * (uConv.z - uConv.y) : c.r * 8.191;
+    if (c.a < 0.5 || z <= 0.0) {
+        float ninf = uintBitsToFloat(0xff800000u);
+        fragColor = uUnk.x > 0.5 ? vec4(ninf, ninf, ninf, 1.0) : vec4(0.0, 0.0, 100.0, 1.0);
+        return;
+    }
+    float u = uConv.w > 0.5 ? 1.0 - vUV.s : vUV.s;          // mirrored image: pixel u shows camera 1-u
+    float x = mix(uLens.x, uLens.z, u) * z;
+    float y = mix(uLens.y, uLens.w, vUV.t) * z;
+    if (uConv.w > 0.5) x = -x;                               // mirror the cloud like the image
+    fragColor = TDOutputSwizzle(vec4(x, y, z, 1.0));
+}
 '''
 
 START_CALLBACKS = r'''
@@ -389,10 +421,13 @@ toggle(k, 'Active', 'Active', True)
 menu(k, 'Camerares', 'Camera Resolution',
      ['320', '640', '960', '1280'], ['320x320', '640x640', '960x960', '1280x1280'], '640')
 toggle(k, 'Neardepthmode', 'Near Depth Mode', False)
+menu(k, 'Image', 'Image', ['depth', 'pointcloud'], ['Depth', 'Color Point Cloud'], 'depth')
 toggle(k, 'Mirrorimage', 'Mirror Image', False)
 num(k, 'Tooclosevalue', 'Too Close Value', 0.0, 0, 1, clamp=True)
 num(k, 'Toofarvalue', 'Too Far Value', 0.0, 0, 1, clamp=True)
 num(k, 'Unknownvalue', 'Unknown Value', 0.0, 0, 1, clamp=True)
+menu(k, 'Unknownpointvalue', 'Unknown Point Value', ['onehundred', 'neginfinite'],
+     ['(0.0, 0.0, 100.0)', '(-INF, -INF, -INF)'], 'onehundred')
 
 # ---- Quest 3 page: connection + extras ----------------------------------------------
 q = c.appendCustomPage('Quest 3')
@@ -442,7 +477,7 @@ dec.par.pixeldat = 'decode_pixel'
 dec.par.format = 'rgba32float'
 dec.par.vec0name = 'uMode'
 dec.par.vec0valuex.expr = "1 if parent().par.Depthscale.eval() in ('detail', 'ai') else 0"
-dec.par.vec0valuey.expr = "1 if parent().par.Depthscale.eval() == 'ai' else 0"
+dec.par.vec0valuey.expr = "1 if parent().par.Depthscale.eval() == 'ai' or parent().par.Image.eval() == 'pointcloud' else 0"
 dec.par.vec0valuez.expr = "1 if parent().par.Outputrange.eval() == 'stretch' else 0"
 dec.par.vec1name = 'uRange'
 dec.par.vec1valuex.expr = 'parent().par.Mindepth'
@@ -486,9 +521,38 @@ sw.par.index.expr = ("1 if parent().par.Depthscale.eval() == 'ai' and parent().p
                      "else 0")   # show normal depth until the color source is found
 sw.nodeX, sw.nodeY = 800, 0
 
+# ---- Point cloud (Image = Point Cloud) ----------------------------------------------
+pc_src = c.create(textDAT, 'pointcloud_pixel')
+pc_src.text = PC_GLSL
+pc_src.nodeX, pc_src.nodeY = 1000, 150
+
+pc = c.create(glslTOP, 'pointcloud')
+pc.inputConnectors[0].connect(sw)
+pc.par.pixeldat = 'pointcloud_pixel'
+pc.par.format = 'rgba32float'
+pc.par.vec0name = 'uLens'
+pc.par.vec0valuex.expr = "(lambda o: next((c.eval() for n in ('quest/lensx0', 'quest_lensx0', 'lensx0') for c in [o[n]] if c is not None), -0.9))(parent().op('status'))"
+pc.par.vec0valuey.expr = "(lambda o: next((c.eval() for n in ('quest/lensy0', 'quest_lensy0', 'lensy0') for c in [o[n]] if c is not None), -0.68))(parent().op('status'))"
+pc.par.vec0valuez.expr = "(lambda o: next((c.eval() for n in ('quest/lensx1', 'quest_lensx1', 'lensx1') for c in [o[n]] if c is not None), 0.9))(parent().op('status'))"
+pc.par.vec0valuew.expr = "(lambda o: next((c.eval() for n in ('quest/lensy1', 'quest_lensy1', 'lensy1') for c in [o[n]] if c is not None), 0.68))(parent().op('status'))"
+pc.par.vec1name = 'uConv'
+pc.par.vec1valuex.expr = "1 if parent().par.Outputrange.eval() == 'stretch' else 0"
+pc.par.vec1valuey.expr = 'parent().par.Mindepth'
+pc.par.vec1valuez.expr = 'parent().par.Maxdepth'
+pc.par.vec1valuew.expr = 'parent().par.Mirrorimage'
+pc.par.vec2name = 'uUnk'
+pc.par.vec2valuex.expr = "1 if parent().par.Unknownpointvalue.eval() == 'neginfinite' else 0"
+pc.nodeX, pc.nodeY = 1000, 0
+
+img = c.create(switchTOP, 'image')
+img.inputConnectors[0].connect(sw)
+img.inputConnectors[1].connect(pc)
+img.par.index.expr = "1 if parent().par.Image.eval() == 'pointcloud' else 0"
+img.nodeX, img.nodeY = 1200, 0
+
 out = c.create(outTOP, 'out1')
-out.inputConnectors[0].connect(sw)
-out.nodeX, out.nodeY = 1000, 0
+out.inputConnectors[0].connect(img)
+out.nodeX, out.nodeY = 1400, 0
 
 osc = c.create(oscoutDAT, 'oscout1')
 osc.par.address.expr = 'parent().par.Questip'

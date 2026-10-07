@@ -14,6 +14,9 @@ public sealed partial class NdiSender : MonoBehaviour
     // [Quest3Bridge patch] Advertised frame rate (Hz) stamped on outgoing frames
     public float frameRate = 60;
 
+    // [Quest3Bridge patch] Send texture values as-is (no Linear->sRGB gamma); for data such as depth
+    public bool rawValues = false;
+
     public string ndiName
       { get => _ndiNameRuntime;
         set => SetNdiName(value); }

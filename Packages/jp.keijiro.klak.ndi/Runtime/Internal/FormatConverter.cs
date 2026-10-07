@@ -53,7 +53,7 @@ sealed class FormatConverter : IDisposable
     ComputeBuffer _encoderOutput;
 
     // Immediate mode version
-    public ComputeBuffer Encode(Texture source, bool enableAlpha, bool vflip)
+    public ComputeBuffer Encode(Texture source, bool enableAlpha, bool vflip, bool raw = false)
     {
         var width = source.width;
         var height = source.height;
@@ -72,7 +72,8 @@ sealed class FormatConverter : IDisposable
 
         // Compute thread dispatching
         var compute = _resources.encoderCompute;
-        var pass = (enableAlpha ? 2 : 0) + (Util.InGammaMode ? 0 : 1);
+        // [Quest3Bridge patch] raw: use the no-conversion (sRGB) kernel so data values survive unchanged
+        var pass = (enableAlpha ? 2 : 0) + (Util.InGammaMode || raw ? 0 : 1);
         compute.SetFloat("VFlip", vflip ? 1 : 0);
         compute.SetTexture(pass, "Source", source);
         compute.SetBuffer(pass, "Destination", _encoderOutput);

@@ -21,7 +21,9 @@ Unity (URP) app for Meta Quest 3 that grabs the Meta XR environment depth textur
 - Don't spawn subagents unless asked. Use WebSearch only to confirm an API you're unsure of, and search once with a targeted query.
 - Keep answers short and skip summaries of things that didn't change.
 - Python on Windows defaults to cp1252. Always run with `PYTHONUTF8=1`, and use the Edit/Write tools for files with non-ASCII text (README has ▸ ↕ ²).
-- KlakNDI is embedded in `Packages/jp.keijiro.klak.ndi` with `[Quest3Bridge patch]` changes (frame-rate/timecode stamping, fps limiter). Never delete it or swap it for the registry version.
+- KlakNDI is embedded in `Packages/jp.keijiro.klak.ndi` with `[Quest3Bridge patch]` changes: frame-rate/timecode stamping, an fps limiter, and `rawValues`. Never delete it or swap it for the registry version.
+- **Depth must be sent with `NdiSender.rawValues = true`.** The project is in Linear color space, so KlakNDI otherwise applies Linear→sRGB gamma, which bent all depth values (you at 0.71 m read as 2.28 m). Color keeps the gamma. Verify distances against a tape measure after any change to the depth encoding.
+- Offline tools can get OSC replies on another port with `/replyport <port>`, because TD owns 9001.
 
 ## Deliverables
 | File | Purpose |
