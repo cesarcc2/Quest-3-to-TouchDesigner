@@ -81,6 +81,9 @@ def onValueChange(par, prev):
         if p.Active.eval():
             send('Depthscale')           # turns the color camera + alignment on/off
             osc('/status', 0)            # ask for the lens values
+            if par.eval() == 'pointcloud':
+                for frames in (60, 150, 300, 600):   # color source appears once the camera starts
+                    run("op('{}').module.find_color()".format(me.path), delayFrames=frames, fromOP=me)
     elif p.Active.eval():
         send(par.name)
         if par.name == 'Depthscale' and par.eval() == 'ai':
@@ -349,6 +352,18 @@ def _cook(scriptOp):
     return
 '''
 
+PCCOLOR_GLSL = r'''
+// Point cloud color: camera color at the same pixel as each point (input 0 = point cloud, 1 = color).
+// Depth is aligned to the color camera, so the same UV is the same spot. Alpha = valid point.
+out vec4 fragColor;
+void main() {
+    vec4 p = texture(sTD2DInputs[0], vUV.st);
+    vec3 rgb = texture(sTD2DInputs[1], vUV.st).rgb;
+    float valid = (p.z > 0.0 && p.z < 99.0) ? 1.0 : 0.0;   // unknown points are (0,0,100) or -inf
+    fragColor = TDOutputSwizzle(vec4(rgb, valid));
+}
+'''
+
 PC_GLSL = r'''
 // Kinect-style point cloud: RGB = XYZ in meters relative to the color camera (x right, y up, z forward).
 // Input = the panel's depth image (Kinect units or Min..Max stretched), alpha = valid.
@@ -490,7 +505,8 @@ dec.nodeX, dec.nodeY = 200, 0
 
 # ---- AI Detail branch ----------------------------------------------------------------
 ndic = c.create(ndiinTOP, 'ndiin_color')
-ndic.par.active.expr = "bool(parent().par.Active.eval()) and parent().par.Depthscale.eval() == 'ai'"
+ndic.par.active.expr = ("bool(parent().par.Active.eval()) and (parent().par.Depthscale.eval() == 'ai' "
+                        "or parent().par.Image.eval() == 'pointcloud')")
 ndic.par.name.expr = 'parent().par.Ndicolor'
 ndic.nodeX, ndic.nodeY = 0, 300
 
@@ -553,6 +569,21 @@ img.nodeX, img.nodeY = 1200, 0
 out = c.create(outTOP, 'out1')
 out.inputConnectors[0].connect(img)
 out.nodeX, out.nodeY = 1400, 0
+
+# ---- Point cloud color (out2): RGB per point, alpha = valid --------------------------
+pcc_src = c.create(textDAT, 'pointcloud_color_pixel')
+pcc_src.text = PCCOLOR_GLSL
+pcc_src.nodeX, pcc_src.nodeY = 1200, -150
+
+pcc = c.create(glslTOP, 'pointcloud_color')
+pcc.inputConnectors[0].connect(pc)       # sets the resolution: one color per point
+pcc.inputConnectors[1].connect(ndic)
+pcc.par.pixeldat = 'pointcloud_color_pixel'
+pcc.nodeX, pcc.nodeY = 1200, -300
+
+out2 = c.create(outTOP, 'out2')
+out2.inputConnectors[0].connect(pcc)
+out2.nodeX, out2.nodeY = 1400, -300
 
 osc = c.create(oscoutDAT, 'oscout1')
 osc.par.address.expr = 'parent().par.Questip'

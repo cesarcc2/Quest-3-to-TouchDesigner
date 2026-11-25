@@ -88,7 +88,10 @@ On the `quest3` panel's **Kinect** page, set **Image ▸ Color Point Cloud**. Th
 - **Unknown Point Value:** pixels without depth get (0, 0, 100) or (−inf, −inf, −inf), as on the Kinect TOP.
 - **Color camera:** it turns on by itself. The Quest reports its exact lens geometry (`/quest/lensx0 …`), and depth is aligned to it.
 - **Depth source:** works with **Detail** (measured, blockier) and **AI Detail** (smooth and detailed, estimated).
-- **Use it like the Kinect tutorials:** feed the output into a **TOP to CHOP**, or use it directly as **instancing** in a **Geometry COMP** (Instance page: Translate X/Y/Z = r/g/b). Color the points with the `ndiin_color` image inside `quest3`.
+- **Use it like the Kinect tutorials:** feed the output into a **TOP to CHOP**, or use it directly as **instancing** in a **Geometry COMP**.
+- **Colored points (`quest3` output 2):** the camera color at the same pixel as each point, with alpha = valid point. On the Geometry COMP's **Instance** pages:
+  - **Translate OP:** `quest3` output 1, with Translate X/Y/Z = r/g/b
+  - **Color OP:** `quest3` output 2, with Color R/G/B = r/g/b (alpha can hide invalid points)
 
 ## AI Detail (color camera + AI depth)
 **Depth Scale ▸ AI Detail** on the `quest3` panel gives much finer depth, with faces showing eyes, nose and lips. It works like this:
